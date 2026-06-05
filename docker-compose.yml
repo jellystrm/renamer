@@ -8,7 +8,9 @@ services:
     volumes:
       - /path/to/your/movies:/movies
       - /path/to/your/tvshows:/tv
+      - /path/to/your/appdata:/appdata
     environment:
       - TMDB_API_KEY=${TMDB_API_KEY}
       - MOVIE_DIR=/movies
       - TV_DIR=/tv
+      - APPDATA_DIR=/appdata

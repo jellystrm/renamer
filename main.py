@@ -9,11 +9,26 @@ from pathlib import Path
 from tmdb import search_tmdb, parse_name, TMDB_API_KEY, BASE_URL
 import requests
 
-# --- Logging Setup ---
-if os.path.exists("app.log"):
-    os.remove("app.log")
+APPDATA_DIR = Path(os.getenv("APPDATA_DIR", "/appdata"))
+APPDATA_DIR.mkdir(parents=True, exist_ok=True)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", handlers=[logging.FileHandler("app.log"), logging.StreamHandler()])
+LOG_DIR = APPDATA_DIR / "logs"
+CACHE_DIR = APPDATA_DIR / "cache"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+LOG_FILE = LOG_DIR / "app.log"
+HISTORY_FILE = CACHE_DIR / "history.json"
+
+# --- Logging Setup ---
+if LOG_FILE.exists():
+    LOG_FILE.unlink()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()]
+)
 logger = logging.getLogger("renamer")
 
 app = FastAPI(title="Jellyfin Renamer UI")
@@ -40,10 +55,12 @@ class OverrideRequest(BaseModel):
 @app.get("/api/logs")
 async def get_logs():
     try:
-        if os.path.exists("app.log"):
-            with open("app.log", "r") as f: return {"logs": f.readlines()[-100:]}
+        if LOG_FILE.exists():
+            with LOG_FILE.open("r") as f:
+                return {"logs": f.readlines()[-100:]}
         return {"logs": ["Log file not found."]}
-    except: return {"logs": []}
+    except Exception:
+        return {"logs": []}
 
 @app.get("/api/scan")
 async def scan_folders():
@@ -119,8 +136,6 @@ def create_media_item_from_data(item, tmdb_data):
     return item
 
 import json
-
-HISTORY_FILE = "history.json"
 
 def load_history():
     if os.path.exists(HISTORY_FILE):
