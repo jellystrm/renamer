@@ -1,0 +1,9 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+app.log
+history.json
+test_media

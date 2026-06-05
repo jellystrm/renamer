@@ -1,0 +1,7 @@
+__pycache__/
+.env
+app.log
+
+# Ignore local test assets and macOS metadata
+test_media/
+.DS_Store

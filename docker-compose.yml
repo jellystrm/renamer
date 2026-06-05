@@ -1,0 +1,14 @@
+services:
+  jellyfin-renamer:
+    image: ghcr.io/jellystrm/renamer:latest
+    container_name: jellyfin-renamer
+    restart: unless-stopped
+    ports:
+      - "8099:8099"
+    volumes:
+      - /path/to/your/movies:/movies
+      - /path/to/your/tvshows:/tv
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - MOVIE_DIR=/movies
+      - TV_DIR=/tv

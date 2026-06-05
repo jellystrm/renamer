@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jellyfin Renamer Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; }
+        .card { background-color: #161b22; border: 1px solid #30363d; }
+        .btn-primary { background-color: #238636; color: white; }
+        .btn-success { background-color: #1f6feb; color: white; }
+        .btn-secondary { background-color: #555; color: white; }
+        .tmdb-input { width: 80px; padding: 4px; background: #0d1117; color: #fff; border: 1px solid #555; border-radius: 4px; font-size: 12px; }
+        .status-pill { padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; }
+        .name-scroll { width: 100%; overflow-x: auto; white-space: nowrap; display: block; }
+        .name-scroll::-webkit-scrollbar { display: none; }
+        td { min-width: 0; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: #252525; padding: 25px; border-radius: 8px; max-width: 400px; text-align: center; }
+        
+        #sidebar { transition: width 0.3s; }
+        .nav-text { transition: opacity 0.3s; }
+        .collapsed .nav-text { display: none !important; }
+        .collapsed { width: 80px; }
+        #sidebar.collapsed .nav-item, #sidebar.collapsed button, #sidebar.collapsed .flex { justify-content: center !important; gap: 0 !important; }
+        .nav-item, button { justify-content: flex-start !important; }
+    </style>
+</head>
+<body class="flex h-screen">
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content">
+            <h3>Confirm</h3>
+            <p id="modal-text"></p>
+            <label><input type="checkbox" id="remember-choice"> Don't ask again</label>
+            <div style="margin-top:20px; display:flex; gap:10px; justify-content:center;">
+                <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn-success" onclick="confirmRename()">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <aside id="sidebar" class="w-64 bg-[#161b22] border-r border-[#30363d] p-6 flex flex-col collapsed">
+        <div class="flex items-center gap-4 mb-8">
+            <button onclick="toggleSidebar()" class="text-[#00a4dc] font-bold text-2xl">☰</button>
+            <h2 class="text-xl font-bold text-[#00a4dc] nav-text">Renamer</h2>
+        </div>
+        <nav class="w-full">
+            <div class="nav-item active p-3 mb-2 rounded-lg cursor-pointer bg-[#21262d] font-semibold flex items-center justify-center gap-3 transition-all" onclick="showTab('scan', this)">
+                <span class="text-xl">📊</span><span class="nav-text">Dashboard</span>
+            </div>
+            <div class="nav-item p-3 mb-2 rounded-lg cursor-pointer hover:bg-[#21262d] font-semibold flex items-center justify-center gap-3 transition-all" onclick="showTab('history', this)">
+                <span class="text-xl">🕒</span><span class="nav-text">History</span>
+            </div>
+        </nav>
+        <button class="mt-auto bg-[#30363d] text-white p-3 rounded-lg font-semibold flex items-center justify-center gap-3" onclick="copyLogs()" title="Copy Logs">
+            <span class="text-xl">📋</span><span class="nav-text">Copy Logs</span>
+        </button>
+    </aside>
+    
+    <main class="flex-1 p-8 overflow-y-auto">
+        <div id="scan-tab">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="tab-title" class="text-2xl font-bold">Dashboard</h2>
+            </div>
+            <div class="flex gap-3 mb-6 items-center">
+                <button class="btn-primary px-6 py-2 rounded-lg font-semibold" onclick="scan()">Start Scan</button>
+                <select id="type-filter" class="bg-[#161b22] border border-[#30363d] px-4 py-2 rounded-lg" onchange="renderItems()">
+                    <option value="all">All Types</option>
+                    <option value="movie">Movies</option>
+                    <option value="tv">TV Shows</option>
+                </select>
+                <select id="status-filter" class="bg-[#161b22] border border-[#30363d] px-4 py-2 rounded-lg" onchange="renderItems()">
+                    <option value="all">All Status</option>
+                    <option value="unmatched">Unmatched</option>
+                    <option value="ready">Ready to Rename</option>
+                    <option value="ok">No Rename Needed</option>
+                </select>
+            </div>
+            
+            <table class="w-full text-left border-collapse border border-[#30363d] table-fixed">
+                <thead class="bg-[#161b22]">
+                    <tr>
+                        <th class="p-3 w-10"><input type="checkbox" id="select-all" class="w-4 h-4" onclick="toggleSelectAll()"></th>
+                        <th class="p-3 w-16">Type</th>
+                        <th class="p-3 w-1/6">Current Name</th>
+                        <th class="p-3 w-1/6">Proposed Name</th>
+                        <th class="p-3 w-40 text-left">Edit</th>
+                        <th class="p-3 w-32 text-right"><button id="rename-all-btn" class="btn-success px-2 py-1 rounded text-xs disabled:opacity-50" disabled onclick="renameSelected()">Rename</button></th>
+                    </tr>
+                </thead>
+                <tbody id="items-list"></tbody>
+            </table>
+        </div>
+
+        <div id="history-tab" class="hidden">
+            <h2 class="text-2xl font-bold mb-6">Renaming History</h2>
+            <div id="history-list" class="space-y-4"></div>
+        </div>
+    </main>
+
+    <script>
+        const CACHE_TTL_MS = 30 * 60 * 1000;
+        let items = JSON.parse(localStorage.getItem('renamer_items')) || [];
+        const cacheTimestamp = localStorage.getItem('renamer_timestamp');
+
+        if (cacheTimestamp && (Date.now() - parseInt(cacheTimestamp) > CACHE_TTL_MS)) {
+            items = [];
+            localStorage.removeItem('renamer_items');
+            localStorage.removeItem('renamer_timestamp');
+        }
+
+        let currentTab = localStorage.getItem('renamer_tab') || 'scan';
+        let sidebarCollapsed = localStorage.getItem('renamer_sidebar_collapsed');
+        if (sidebarCollapsed === null) sidebarCollapsed = true;
+        else sidebarCollapsed = sidebarCollapsed === 'true';
+        let rememberChoice = false;
+        let pendingRenameAction = null;
+
+        function setSidebarState() {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebarCollapsed) {
+                sidebar.classList.add('collapsed');
+                sidebar.classList.remove('w-64');
+                sidebar.classList.add('w-20');
+            } else {
+                sidebar.classList.remove('collapsed');
+                sidebar.classList.remove('w-20');
+                sidebar.classList.add('w-64');
+            }
+        }
+
+        function saveSidebarState() {
+            localStorage.setItem('renamer_sidebar_collapsed', sidebarCollapsed.toString());
+        }
+
+        window.onload = () => {
+            setSidebarState();
+            if (items.length > 0) renderItems();
+            document.getElementById('scan-tab').classList.toggle('hidden', currentTab === 'history');
+            document.getElementById('history-tab').classList.toggle('hidden', currentTab !== 'history');
+        };
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebarCollapsed = !sidebarCollapsed;
+            setSidebarState();
+            saveSidebarState();
+        }
+
+        function saveState() {
+            localStorage.setItem('renamer_items', JSON.stringify(items));
+            localStorage.setItem('renamer_tab', currentTab);
+            localStorage.setItem('renamer_timestamp', Date.now().toString());
+        }
+
+        function closeModal() { document.getElementById('confirm-modal').style.display = 'none'; }
+        async function confirmRename() { rememberChoice = document.getElementById('remember-choice').checked; closeModal(); if (pendingRenameAction) await pendingRenameAction(); }
+
+        async function requestConfirmation(message, action) {
+            if (rememberChoice) { await action(); return; }
+            document.getElementById('modal-text').textContent = message;
+            document.getElementById('confirm-modal').style.display = 'flex';
+            pendingRenameAction = action;
+        }
+
+        function toggleSelectAll() {
+            const isChecked = document.getElementById('select-all').checked;
+            document.querySelectorAll('.item-checkbox:not([disabled])').forEach(cb => cb.checked = isChecked);
+            updateRenameAllButton();
+        }
+
+        function updateRenameAllButton() {
+            const checkboxes = document.querySelectorAll('.item-checkbox:not([disabled])');
+            const checkedCheckboxes = document.querySelectorAll('.item-checkbox:not([disabled]):checked');
+            const renameAllBtn = document.getElementById('rename-all-btn');
+            renameAllBtn.disabled = checkedCheckboxes.length === 0;
+        }
+
+        async function copyLogs() {
+            try {
+                const response = await fetch('/api/logs');
+                const data = await response.json();
+                await navigator.clipboard.writeText(data.logs.join(''));
+                alert('Logs copied to clipboard!');
+            } catch (e) { alert('Failed to copy logs.'); }
+        }
+
+        function showTab(tab, el) {
+            currentTab = tab;
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('bg-[#21262d]'));
+            el.classList.add('bg-[#21262d]');
+            document.getElementById('scan-tab').classList.toggle('hidden', tab === 'history');
+            document.getElementById('history-tab').classList.toggle('hidden', tab !== 'history');
+            saveState();
+            if (tab === 'history') loadHistory();
+        }
+
+        async function scan() {
+            items = [];
+            localStorage.removeItem('renamer_items');
+            localStorage.removeItem('renamer_timestamp');
+            
+            document.getElementById('items-list').innerHTML = '<tr><td colspan="6" class="text-center p-10 text-[#00a4dc] text-xl font-bold">Scanning...</td></tr>';
+            
+            try {
+                const response = await fetch('/api/scan');
+                const allItems = await response.json();
+                items = allItems;
+                saveState();
+                renderItems();
+                items.forEach((_, index) => matchItem(index));
+            } catch (e) { alert('Scan failed: ' + e); }
+        }
+
+        async function matchItem(index) {
+            const item = items[index];
+            try {
+                const response = await fetch('/api/match', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(item) });
+                items[index] = await response.json();
+                saveState();
+                renderItems();
+            } catch (e) { console.error(e); }
+        }
+
+        function renderItems() {
+            const container = document.getElementById('items-list');
+            const typeFilter = document.getElementById('type-filter').value;
+            const statusFilter = document.getElementById('status-filter').value;
+            container.innerHTML = '';
+            
+            items.forEach((item, index) => {
+                if (typeFilter !== 'all' && item.media_type !== typeFilter) return;
+                
+                const isMatched = item.status === 'matched';
+                const needsRename = isMatched && (item.current_name !== item.proposed_name);
+                
+                if (statusFilter === 'unmatched' && isMatched) return;
+                if (statusFilter === 'ready' && !needsRename) return;
+                if (statusFilter === 'ok' && (needsRename || !isMatched)) return;
+                
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-[#30363d] hover:bg-[#1f242d]';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'item-checkbox';
+                checkbox.dataset.index = index;
+                if (needsRename) {
+                    checkbox.checked = true;
+                    checkbox.onclick = updateRenameAllButton;
+                } else {
+                    checkbox.disabled = true;
+                }
+                
+                tr.innerHTML = `
+                    <td class="p-3"></td>
+                    <td class="p-3"><span class="status-pill ${item.media_type === 'movie' ? 'bg-blue-900' : 'bg-orange-900'}">${item.media_type.toUpperCase()}</span></td>
+                    <td class="p-3 text-sm"><div class="name-scroll" title="${item.current_name}">${item.current_name}</div></td>
+                    <td class="p-3 text-sm ${needsRename ? 'text-green-500 font-bold' : ''}"><div class="name-scroll" title="${item.proposed_name || ''}">${item.proposed_name || 'Matching...'}</div></td>
+                    <td class="p-3 flex justify-start gap-2">
+                        <input type="number" id="override-${index}" class="tmdb-input" value="${item.tmdb_id || ''}">
+                        <button class="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded text-xs" onclick="overrideId(${index})">Update</button>
+                        <button class="bg-yellow-600 hover:bg-yellow-700 text-white px-2 py-1 rounded text-xs" onclick="rematchItem(${index})">Rematch</button>
+                    </td>
+                    <td class="p-3 text-right">
+                        <div class="flex justify-end gap-2">
+                             ${isMatched ? `<a href="https://www.themoviedb.org/${item.media_type}/${item.tmdb_id}" target="_blank" class="text-[#00a4dc] text-xs hover:underline">TMDB</a>` : ''}
+                             <button class="btn-success px-2 py-1 rounded text-xs ${needsRename ? '' : 'invisible'}" onclick="renameItem(${index})">Rename</button>
+                        </div>
+                    </td>
+                `;
+                tr.querySelector('td:first-child').appendChild(checkbox);
+                container.appendChild(tr);
+            });
+            updateRenameAllButton();
+        }
+
+        async function overrideId(index) {
+            const item = items[index];
+            const newId = document.getElementById(`override-${index}`).value;
+            try {
+                const response = await fetch('/api/override', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ path: item.path, tmdb_id: parseInt(newId), media_type: item.media_type })
+                });
+                items[index] = await response.json();
+                saveState();
+                renderItems();
+            } catch (e) { alert('Override failed: ' + e); }
+        }
+
+        async function rematchItem(index) {
+            items[index].status = 'matching';
+            items[index].proposed_name = 'Matching...';
+            renderItems();
+            await matchItem(index);
+        }
+
+        async function renameSelected() {
+            const checkboxes = document.querySelectorAll('.item-checkbox:checked');
+            const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.dataset.index));
+            const selectedItems = selectedIndices.map(index => items[index]);
+            if (selectedItems.length === 0) return;
+            requestConfirmation(`Rename ${selectedItems.length} items?`, async () => {
+                try {
+                    await fetch('/api/rename', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ items: selectedItems })
+                    });
+                    items = items.filter((_, index) => !selectedIndices.includes(index));
+                    saveState();
+                    renderItems();
+                } catch (e) { alert('Rename failed: ' + e); }
+            });
+        }
+
+        async function renameItem(index) {
+            const item = items[index];
+            requestConfirmation(`Rename to ${item.proposed_name}?`, async () => {
+                try {
+                    await fetch('/api/rename', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ items: [item] })
+                    });
+                    items.splice(index, 1);
+                    saveState();
+                    renderItems();
+                } catch (e) { alert('Rename failed: ' + e); }
+            });
+        }
+
+        async function loadHistory() {
+            const response = await fetch('/api/history');
+            const data = await response.json();
+            const container = document.getElementById('history-list');
+            container.innerHTML = '';
+            data.items.reverse().forEach(item => {
+                container.innerHTML += `
+                    <div class="card p-4 rounded-lg">
+                        <div class="font-bold">${item.current_name} &rarr; ${item.proposed_name}</div>
+                        <div class="meta text-xs mt-1">[${item.media_type.toUpperCase()}] TMDB: ${item.tmdb_id}</div>
+                    </div>
+                `;
+            });
+        }
+    </script>
+</body>
+</html>
