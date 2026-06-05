@@ -40,6 +40,14 @@ def search_tmdb(query, year=None, media_type="movie"):
     # Sort by popularity to get the most likely match
     results.sort(key=lambda x: x.get("popularity", 0), reverse=True)
     return results[0]
+def strip_season_information(name):
+    """Remove season-specific labels like 'Season 1' or 'S01' from a title."""
+    name = re.sub(r'(?i)\bSeason\s*\d+\b', '', name)
+    name = re.sub(r'(?i)\bSeries\s*\d+\b', '', name)
+    name = re.sub(r'(?i)\bS\d{1,2}(?:E\d{1,2})?\b', '', name)
+    return name
+
+
 def parse_name(folder_name):
     """Extract title and year from folder name."""
     # Look for year (19xx or 20xx) preceded by non-alphanumeric or start of string
@@ -47,8 +55,9 @@ def parse_name(folder_name):
     year_match = re.search(r'(?:^|[\.\s\-\_\(\[])(19\d{2}|20\d{2})(?:[\.\s\-\_\)\]]|$)', folder_name)
     year = year_match.group(1) if year_match else None
 
-    # Remove all separators for cleaning
+    # Replace common separators with spaces
     clean_title = re.sub(r'[\.\-\_]', ' ', folder_name)
+    clean_title = strip_season_information(clean_title)
 
     if year:
         # Split by year to get the title part

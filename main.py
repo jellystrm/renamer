@@ -99,12 +99,20 @@ async def override_tmdb_id(request: OverrideRequest):
     if response.status_code != 200: raise HTTPException(status_code=400, detail="Invalid ID")
     return create_media_item_from_data(MediaItem(id=request.path, current_name=Path(request.path).name, media_type=request.media_type, path=request.path), response.json())
 
+def has_season_marker(name: str) -> bool:
+    return bool(re.search(r'(?i)\bSeason\s*\d+\b|\bS\d{1,2}\b', name))
+
+
 def create_media_item_from_data(item, tmdb_data):
     title = tmdb_data.get("title") or tmdb_data.get("name")
     year = (tmdb_data.get("release_date") or tmdb_data.get("first_air_date") or "")[:4]
     tmdb_id = tmdb_data["id"]
     new_name = re.sub(r'[\\/*?:"<>|]', "", f"{title} ({year}) [tmdbid-{tmdb_id}]")
     item.proposed_name = new_name
+
+    if item.media_type == "tv" and has_season_marker(item.current_name):
+        item.proposed_name = f"{new_name}/{item.current_name}"
+
     item.tmdb_id = tmdb_id
     item.year = year
     item.status = "matched"
@@ -138,9 +146,12 @@ async def rename_items(request: RenameRequest):
         old = Path(item.path)
         if old.exists() and item.proposed_name:
             try:
-                old.rename(old.parent / item.proposed_name)
+                new_path = old.parent / item.proposed_name
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                old.rename(new_path)
                 renamed.append(item)
-            except: pass
+            except Exception as e:
+                logger.error(f"Failed to rename {old}: {e}")
     if renamed:
         save_to_history(renamed)
     return {"status": "success", "count": len(renamed)}
